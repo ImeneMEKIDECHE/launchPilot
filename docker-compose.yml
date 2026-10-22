@@ -1,5 +1,8 @@
 # Manifeste pour Aiven Runtime (Deploy application > Scan).
-# Les secrets (DATABASE_URL, ANTHROPIC_API_KEY, Kafka) se renseignent dans la config de l'app Aiven, pas dans ce fichier.
+# Les secrets se renseignent dans la configuration de l'application Aiven, jamais dans ce fichier :
+#   DATABASE_URL       = Service URI du PostgreSQL Aiven
+#   ANTHROPIC_API_KEY  = clé API Claude (sans elle, les agents tournent en mode règles)
+#   CLAUDE_MODEL       = optionnel (défaut claude-sonnet-5-5)
 services:
   launchpilot:
     build: .
@@ -8,3 +11,4 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CLAUDE_MODEL: ${CLAUDE_MODEL}

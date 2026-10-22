@@ -42,7 +42,9 @@ def supplier_memory(db):
                                  "ratio": real / ann, "late_po_ids": late}
     return mem
 
-def project(db, events_seen, mode="learned", window_end=None):
+def project(db, events_seen, mode="learned", window_end=None, extra_pos=None, demand_scale=None):
+    """extra_pos : commandes simulées [{component_id, qty, arrival(date), label}] ;
+    demand_scale : {product_id: facteur} pour simuler une réduction de lancement."""
     sim_today = _d(db["gt"]["sim_today"])
     window_end = window_end or _d(db["gt"]["window_end"])
     mem = supplier_memory(db)
@@ -63,7 +65,14 @@ def project(db, events_seen, mode="learned", window_end=None):
             m = mem[p["supplier_id"]]
             p["arrival"] = _d(p["order_date"]) + timedelta(days=m["prudent"])
             p["evidence"].append(f"supplier_reliability:{p['supplier_id']} (annoncé {m['announced']} j, réel {m['real_mean']} ± {m['std']} j sur {m['n']} livraisons, délai prudent {m['prudent']} j)")
+    for i, x in enumerate(extra_pos or []):
+        open_pos[f"SIM-{i}"] = {"po_id": f"SIM-{i}", "component_id": x["component_id"], "qty": x["qty"],
+                                "qty_eff": int(x["qty"]), "arrival": x["arrival"], "supplier_id": x.get("supplier_id", ""),
+                                "evidence": [f"simulation:{x.get('label', 'commande simulée')}"]}
     demand_mult = {}
+    for pid, f in (demand_scale or {}).items():
+        for w in weeks:
+            demand_mult[(pid, w)] = f
     for e in events_seen:
         t, pl = e["event_type"], e["payload"]
         if t == "supplier_delay" and pl["po_id"] in open_pos:
@@ -86,18 +95,21 @@ def project(db, events_seen, mode="learned", window_end=None):
     out = {}
     for cid in stock:
         s, first_neg, min_s, ev = stock[cid], None, stock[cid], set([f"inventory:{cid}"])
+        series = []
         for w in weeks:
             for p in open_pos.values():
-                if p["component_id"] == cid and monday(p["arrival"]) == w:
+                arr = monday(p["arrival"])
+                if p["component_id"] == cid and (arr == w or (w == weeks[0] and arr < w)):
                     s += p["qty_eff"]; ev.update(p["evidence"])
             for pid, b in bom.items():
                 if cid in b:
                     mult = demand_mult.get((pid, w), 1.0)
                     s -= int(fc[(w, pid)] * mult * b[cid])
                     if mult != 1.0: ev.add(f"events:sellout_spike {pid} x{mult:.2f}")
+            series.append((w.isoformat(), s))
             min_s = min(min_s, s)
             if s < 0 and first_neg is None:
                 first_neg = w
         out[cid] = {"stockout_week": first_neg.isoformat() if first_neg else None,
-                    "min_stock": min_s, "evidence": sorted(ev)}
+                    "min_stock": min_s, "evidence": sorted(ev), "series": series}
     return out
